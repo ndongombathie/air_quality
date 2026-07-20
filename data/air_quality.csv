@@ -1,0 +1,1 @@
+id,location_id,location_name,latitude,longitude,vitesse_vent,direction_vent,timestamp,pm25,pm10,temperature,humidity,co2,tvoc,co,no,no2,so2,o3,nh3,iqr,categorie_iqa,created_at

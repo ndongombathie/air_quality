@@ -1,0 +1,181 @@
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  environment:
+    AIRFLOW_UID: ${AIRFLOW_UID:-50000}
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-changeme}
+    AIRFLOW__WEBSERVER__WEB_SERVER_PORT: "8081"
+    PYTHONPATH: /opt/airflow
+    # --- Connexion MySQL (dockerisé, port publié sur l'hôte -> joint via localhost car Airflow est en network_mode: host) ---
+    MYSQL_HOST: ${MYSQL_HOST:-localhost}
+    MYSQL_PORT: ${MYSQL_PORT:-3308}
+    MYSQL_USER: ${MYSQL_USER:-root}
+    MYSQL_PASSWORD: ${PASSWORD:-}
+    MYSQL_DB: ${MYSQL_DB:-air_quality_db}
+    MYSQL_TABLE: ${MYSQL_TABLE:-air_quality_data}
+    MYSQL_TIMESTAMP_COL: ${MYSQL_TIMESTAMP_COL:-timestamp}
+  user: "${AIRFLOW_UID:-50000}:0"
+  network_mode: host
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./airflow/scripts:/opt/airflow/scripts
+    - ./airflow/data:/opt/airflow/data
+    - ./airflow/models:/opt/airflow/models
+
+services:
+  minio:
+    image: minio/minio
+    container_name: minio-air_quality
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - air_quality_net
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - air_quality_net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9093,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9093,EXTERNAL://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - air_quality_net
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9093
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - air_quality_net
+
+  postgres:
+    image: postgres:16
+    container_name: airflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    networks:
+      - air_quality_net
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-air_quality
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${PASSWORD:-042002}
+      MYSQL_DATABASE: ${MYSQL_DB:-air_quality_db}
+      MYSQL_USER: ${MYSQL_USER:-airflow_reader}
+      MYSQL_PASSWORD: ${PASSWORD:-042002}
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${PASSWORD:-042002}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    networks:
+      - air_quality_net
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    entrypoint: /bin/bash
+    command: >
+      -c "
+      mkdir -p /opt/airflow/logs &&
+      airflow db migrate &&
+      airflow users create
+      --username admin
+      --password admin
+      --firstname Ndongo
+      --lastname Mbath
+      --role Admin
+      --email admin@example.com
+      || true
+      "
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    command: airflow webserver
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-webserver:
+        condition: service_started
+    command: airflow scheduler
+
+networks:
+  air_quality_net:
+
+volumes:
+  minio_data:
+  postgres-db-volume:
+  mysql_data:

@@ -1,0 +1,21 @@
+FROM apache/airflow:2.10.0
+
+USER root
+
+RUN apt-get update && apt-get install -y \
+    gcc \
+    default-libmysqlclient-dev
+
+USER airflow
+
+RUN pip install --no-cache-dir \
+    pandas \
+    numpy \
+    sqlalchemy \
+    pymysql \
+    psycopg2-binary \
+    minio \
+    kafka-python-ng \
+    scikit-learn \
+    matplotlib \
+    joblib

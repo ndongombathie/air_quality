@@ -1,0 +1,7 @@
+pandas
+python-dotenv
+python-mysql
+kafka-python
+requests
+sqlalchemy
+mysql-connector-python
