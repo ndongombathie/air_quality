@@ -27,9 +27,10 @@ def predict(request):
     })  
     
     prediction = model.predict(X)
+    print(prediction)
     
     return Response({"polluants": {
-        "iqr": round(float(prediction[0][6]), 2),
+        "iqa": round(float(prediction[0][6]), 2),
         "pm25": round(float(prediction[0][0]), 2),
         "pm10": round(float(prediction[0][1]), 2),
         "co": round(float(prediction[0][2]), 2),
