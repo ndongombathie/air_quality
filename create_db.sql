@@ -46,3 +46,21 @@ CREATE TABLE IF NOT EXISTS air_quality_data (
     INDEX idx_location_id (location_id),
     INDEX idx_timestamp (timestamp)
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS predictions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    location_id BIGINT,
+    `timestamp` TIMESTAMP,
+    predicted_for TIMESTAMP,
+    pm25 FLOAT,
+    pm10 FLOAT,
+    co2 FLOAT,
+    tvoc FLOAT,
+    co FLOAT,
+    no FLOAT,
+    no2 FLOAT,
+    so2 FLOAT,
+    o3 FLOAT,
+    nh3 FLOAT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;

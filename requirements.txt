@@ -5,3 +5,5 @@ kafka-python
 requests
 sqlalchemy
 mysql-connector-python
+sckit-learn
+airflow

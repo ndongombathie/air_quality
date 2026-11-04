@@ -15,6 +15,8 @@ MODEL_PATH = "/opt/airflow/models/knn_model.pkl"
 
 def extract_data(**context):
     df = extract()
+    df = df.sort_values(["location_id", "timestamp"])
+    df = df.groupby("location_id", as_index=False).first()
     df.to_csv(RAW_PATH, index=False)
     print("Extraction OK:", df.shape)
 
