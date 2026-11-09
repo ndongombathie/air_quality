@@ -1,0 +1,6 @@
+# Intégration des modèles IA de l'équipe data (chargement des fichiers .pkl / .joblib).
+-r requirements.txt
+joblib>=1.6
+numpy>=2.3
+scikit-learn>=1.9
+pandas>=2.3

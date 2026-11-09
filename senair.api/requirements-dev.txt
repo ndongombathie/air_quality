@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest>=8.4
+pytest-django>=4.14
+openapi-core>=0.23
+PyYAML>=6
+ruff>=0.14

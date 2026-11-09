@@ -1,0 +1,20 @@
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings_test"
+python_files = ["test_*.py"]
+testpaths = ["tests", "senair"]
+addopts = "-q --strict-markers"
+markers = ["kafka: test d'intégration avec un vrai broker Kafka (exécuté seulement si KAFKA_TEST_BOOTSTRAP est défini)"]
+
+[tool.ruff]
+line-length = 140
+target-version = "py313"
+extend-exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "DJ", "S"]
+# S101 : assert dans les tests. S105/S106 : faux positifs sur les noms de champs « token » / « password ».
+# DJ001 : le contrat distingue null de "" (ex. externalId). DJ008 : __str__ facultatif sur les modèles internes.
+ignore = ["S101", "S105", "S106", "DJ001", "DJ008"]
+
+[tool.ruff.lint.per-file-ignores]
+"senair/common/reference_data.py" = ["E501"]

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://senair.sn/schemas/model.v1.json",
+  "title": "Registre des modèles SEN-AIR v1 (topic senair.models.v1)",
+  "description": "Déclaration d'un modèle entraîné par l'équipe IA (MLflow, Airflow). Un nouveau modèle arrive en « candidate » ; l'administrateur l'active depuis le back-office.",
+  "type": "object",
+  "required": ["schemaVersion", "messageId", "id", "name", "task", "algorithm", "version", "trainedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "messageId": { "type": "string", "minLength": 8, "maxLength": 80 },
+    "id": { "type": "string", "pattern": "^[a-z0-9-]{3,80}$" },
+    "name": { "type": "string", "maxLength": 160 },
+    "task": { "enum": ["forecast", "interpolation", "classification"] },
+    "algorithm": { "type": "string", "maxLength": 80 },
+    "version": { "type": "string", "maxLength": 40 },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "r2": { "type": ["number", "null"] }, "rmse": { "type": ["number", "null"] }, "mae": { "type": ["number", "null"] } }
+    },
+    "trainedAt": { "type": "string", "format": "date-time" },
+    "trackingUrl": { "type": ["string", "null"], "format": "uri" },
+    "artifactUri": { "type": ["string", "null"], "description": "Chemin du fichier modèle (local, s3://, minio://) si l'API doit l'exécuter elle-même." },
+    "signature": { "type": "object", "description": "Entrées et sorties : { inputs: [...], outputs: [...] }." }
+  }
+}

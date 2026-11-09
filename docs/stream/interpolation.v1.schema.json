@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://senair.sn/schemas/interpolation.v1.json",
+  "title": "Grille d'interpolation SEN-AIR v1 (topic senair.interpolations.v1)",
+  "description": "Carte estimée (krigeage, Random Forest...) d'une couche sur Thiès. Sert GET /air-quality/heatmap et /air-quality/at.",
+  "type": "object",
+  "required": ["schemaVersion", "messageId", "model", "layer", "at", "resolutionM", "method", "cells"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "messageId": { "type": "string", "minLength": 8, "maxLength": 80 },
+    "model": { "type": "object", "required": ["id", "version"], "properties": { "id": { "type": "string" }, "version": { "type": "string" } } },
+    "layer": { "enum": ["aqi", "pm25", "pm10", "no2", "so2", "co", "o3"] },
+    "at": { "type": "string", "format": "date-time" },
+    "resolutionM": { "type": "integer", "minimum": 50, "maximum": 5000 },
+    "method": { "enum": ["kriging", "idw", "random_forest", "cokriging"] },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20000,
+      "items": {
+        "type": "object",
+        "required": ["latitude", "longitude", "value"],
+        "additionalProperties": false,
+        "properties": {
+          "latitude": { "type": "number" },
+          "longitude": { "type": "number" },
+          "value": { "type": ["number", "null"] },
+          "aqi": { "type": ["number", "null"] },
+          "uncertainty": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+        }
+      }
+    }
+  }
+}

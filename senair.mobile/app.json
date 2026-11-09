@@ -1,0 +1,60 @@
+{
+  "expo": {
+    "name": "SEN-AIR",
+    "slug": "senair-mobile",
+    "scheme": "senair",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "sn.senair.mobile"
+    },
+    "android": {
+      "package": "sn.senair.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#F3FBFF",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "SEN-AIR utilise votre position pour afficher la qualité de l'air près de vous."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#5AC8FA"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 240,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF"
+        }
+      ],
+      "expo-status-bar",
+      "expo-video",
+      "expo-image"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

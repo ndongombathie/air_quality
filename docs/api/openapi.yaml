@@ -1,0 +1,1475 @@
+openapi: 3.1.0
+info:
+  title: SEN-AIR API
+  version: 1.0.0
+  description: |
+    API REST de la plateforme SEN-AIR (qualité de l'air, Thiès).
+    Contrat attendu par `senair.web` et `senair.mobile` ; miroir de `packages/core/src/api/types.ts`.
+    Conventions : JSON camelCase, dates ISO-8601 UTC, valeur absente = null, pagination par curseur.
+    Voir docs/08-api-endpoints.md pour les règles détaillées.
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Développement
+  - url: https://api.senair.sn/api/v1
+    description: Production (exemple)
+
+tags:
+  - name: Référentiel
+  - name: Qualité de l'air
+  - name: Prévisions
+  - name: Alertes
+  - name: Contenus
+  - name: Authentification
+  - name: Compte
+  - name: Administration
+
+security: []
+
+paths:
+  /metadata:
+    get:
+      tags: [Référentiel]
+      summary: Version de l'API, fraîcheur des données et modèles actifs
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiMetadata' } } } }
+
+  /zones:
+    get:
+      tags: [Référentiel]
+      summary: Zones géographiques de Thiès
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Zone' } } } }
+
+  /stations:
+    get:
+      tags: [Qualité de l'air]
+      summary: Liste des stations
+      parameters:
+        - { name: zoneId, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/StationType' } }
+        - { name: include, in: query, description: "`latest` pour inclure la dernière mesure", schema: { type: string, enum: [latest] } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Station' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /stations/{stationId}:
+    parameters: [{ $ref: '#/components/parameters/StationId' }]
+    get:
+      tags: [Qualité de l'air]
+      summary: Détail d'une station (avec dernière mesure)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Station' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /stations/{stationId}/latest:
+    parameters: [{ $ref: '#/components/parameters/StationId' }]
+    get:
+      tags: [Qualité de l'air]
+      summary: Dernière mesure consolidée d'une station
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AirQualitySnapshot' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /stations/{stationId}/history:
+    parameters: [{ $ref: '#/components/parameters/StationId' }]
+    get:
+      tags: [Qualité de l'air]
+      summary: Historique d'une station
+      parameters:
+        - { $ref: '#/components/parameters/From' }
+        - { $ref: '#/components/parameters/To' }
+        - { $ref: '#/components/parameters/Granularity' }
+        - { $ref: '#/components/parameters/Pollutants' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/History' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /zones/{zoneId}/history:
+    parameters: [{ name: zoneId, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Qualité de l'air]
+      summary: Historique agrégé d'une zone
+      parameters:
+        - { $ref: '#/components/parameters/From' }
+        - { $ref: '#/components/parameters/To' }
+        - { $ref: '#/components/parameters/Granularity' }
+        - { $ref: '#/components/parameters/Pollutants' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/History' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /air-quality/summary:
+    get:
+      tags: [Qualité de l'air]
+      summary: IQA synthétique de la ville ou d'une zone
+      parameters:
+        - { name: zoneId, in: query, schema: { type: string }, description: Absent = ville entière }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AirQualitySummary' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /air-quality/at:
+    get:
+      tags: [Qualité de l'air]
+      summary: IQA estimé à une position (interpolation spatiale)
+      parameters:
+        - { name: lat, in: query, required: true, schema: { type: number, minimum: -90, maximum: 90 } }
+        - { name: lon, in: query, required: true, schema: { type: number, minimum: -180, maximum: 180 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/LocationAirQuality' } } } }
+        '404': { description: Position hors couverture, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /air-quality/heatmap:
+    get:
+      tags: [Qualité de l'air]
+      summary: Grille interpolée pour une couche (IQA ou polluant)
+      parameters:
+        - { name: layer, in: query, required: true, schema: { oneOf: [{ $ref: '#/components/schemas/PollutantCode' }, { const: aqi }] } }
+        - { name: at, in: query, schema: { type: string, format: date-time } }
+        - { name: bbox, in: query, description: 'minLon,minLat,maxLon,maxLat', schema: { type: string, example: '-16.99,14.74,-16.88,14.83' } }
+        - { name: resolutionM, in: query, schema: { type: integer, minimum: 100, maximum: 5000, default: 400 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Heatmap' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /air-quality/history:
+    get:
+      tags: [Qualité de l'air]
+      summary: Historique agrégé de la ville (IQA ville = max des stations à chaque pas)
+      parameters:
+        - { $ref: '#/components/parameters/From' }
+        - { $ref: '#/components/parameters/To' }
+        - { $ref: '#/components/parameters/Granularity' }
+        - { $ref: '#/components/parameters/Pollutants' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/History' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /forecasts:
+    get:
+      tags: [Prévisions]
+      summary: Prévisions IQA (1 h à J+3)
+      parameters:
+        - { name: scope, in: query, schema: { type: string, enum: [city, zone, station], default: city } }
+        - { name: scopeId, in: query, schema: { type: string } }
+        - { name: horizons, in: query, description: Liste séparée par des virgules, schema: { type: string, example: '1h,2h,3h,1d,2d,3d' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ForecastSet' } } } }
+        '404': { description: Aucune prévision disponible (code forecast_unavailable) ou portée inconnue, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /alerts:
+    get:
+      tags: [Alertes]
+      summary: Alertes publiées (vue publique) des ALERT_HISTORY_DAYS derniers jours (30 par défaut) ; une alerte ouverte plus ancienne reste listée tant qu'une mesure la confirme
+      parameters: &alertFilters
+        - { name: status, in: query, schema: { type: string }, description: 'ex. active,acknowledged' }
+        - { name: severity, in: query, schema: { type: string } }
+        - { name: pollutant, in: query, schema: { type: string } }
+        - { name: zoneId, in: query, schema: { type: string } }
+        - { $ref: '#/components/parameters/FromOptional' }
+        - { $ref: '#/components/parameters/ToOptional' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AlertPage' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /alerts/{alertId}:
+    parameters: [{ $ref: '#/components/parameters/AlertId' }]
+    get:
+      tags: [Alertes]
+      summary: Détail public d'une alerte
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Alert' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /thresholds:
+    get:
+      tags: [Référentiel]
+      summary: Seuils d'alerte actifs
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Threshold' } } } }
+
+  /health-guidance:
+    get:
+      tags: [Référentiel]
+      summary: Recommandations sanitaires par profil et niveau
+      parameters:
+        - { name: profile, in: query, schema: { $ref: '#/components/schemas/HealthProfileId' } }
+        - { name: level, in: query, schema: { $ref: '#/components/schemas/AqiLevel' } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/HealthGuidance' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /articles:
+    get:
+      tags: [Contenus]
+      summary: Articles publiés
+      parameters:
+        - { name: category, in: query, schema: { $ref: '#/components/schemas/ArticleCategory' } }
+        - { name: featured, in: query, schema: { type: boolean } }
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ArticleSummaryPage' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /articles/{slug}:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Contenus]
+      summary: Article publié
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Article' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /auth/register:
+    post:
+      tags: [Authentification]
+      summary: Inscription citoyen
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RegisterRequest' } } } }
+      responses:
+        '201': { description: Compte créé, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/login:
+    post:
+      tags: [Authentification]
+      summary: Connexion (MFA requis pour authority/admin)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/LoginRequest' } } } }
+      responses:
+        '200':
+          description: Session ouverte ou second facteur requis
+          content: { application/json: { schema: { oneOf: [{ $ref: '#/components/schemas/Session' }, { $ref: '#/components/schemas/MfaChallenge' }] } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /auth/mfa/verify:
+    post:
+      tags: [Authentification]
+      summary: Vérification du code TOTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challengeId, otp]
+              properties: { challengeId: { type: string }, otp: { type: string, pattern: '^\d{6}$' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /auth/refresh:
+    post:
+      tags: [Authentification]
+      summary: Renouvellement de session (cookie httpOnly sur web, corps sur mobile)
+      requestBody:
+        required: false
+        content: { application/json: { schema: { type: object, properties: { refreshToken: { type: string } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /auth/logout:
+    post:
+      tags: [Authentification]
+      summary: Révocation du refresh token
+      security: [{ bearer: [] }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { type: object, properties: { refreshToken: { type: string } } } } }
+      responses:
+        '204': { description: Déconnecté }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /auth/password/forgot:
+    post:
+      tags: [Authentification]
+      summary: Demande de réinitialisation (réponse identique que le compte existe ou non)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [email], properties: { email: { type: string, format: email } } } } }
+      responses:
+        '204': { description: Demande prise en compte }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /auth/password/reset:
+    post:
+      tags: [Authentification]
+      summary: Nouveau mot de passe via jeton à usage unique
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [token, password], properties: { token: { type: string }, password: { type: string, minLength: 10 } } }
+      responses:
+        '204': { description: 'Mot de passe modifié et sessions révoquées' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /me:
+    get:
+      tags: [Compte]
+      summary: Utilisateur courant et permissions
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [Compte]
+      summary: Mise à jour du profil (nom, zones, profil santé)
+      security: [{ bearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProfileUpdate' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [Compte]
+      summary: Suppression du compte (droit à l'effacement)
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Compte supprimé }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /me/notification-preferences:
+    get:
+      tags: [Compte]
+      security: [{ bearer: [] }]
+      summary: Préférences de notification
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/NotificationPreferences' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [Compte]
+      security: [{ bearer: [] }]
+      summary: Remplacement des préférences de notification
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/NotificationPreferences' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/NotificationPreferences' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /me/devices:
+    post:
+      tags: [Compte]
+      security: [{ bearer: [] }]
+      summary: Enregistrement d'un jeton push
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DeviceRegistration' } } } }
+      responses:
+        '204': { description: Enregistré }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /me/devices/{token}:
+    delete:
+      tags: [Compte]
+      security: [{ bearer: [] }]
+      summary: Désinscription d'un jeton push
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Supprimé }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /me/alerts:
+    get:
+      tags: [Compte]
+      security: [{ bearer: [] }]
+      summary: Alertes de l'utilisateur (zones et niveau minimum), avec l'état lu ; les alertes supprimées par l'utilisateur sont exclues
+      parameters:
+        - { name: status, in: query, schema: { type: string }, description: 'ex. active,acknowledged' }
+        - { name: severity, in: query, schema: { type: string } }
+        - { name: pollutant, in: query, schema: { type: string } }
+        - { name: zoneId, in: query, schema: { type: string } }
+        - { name: unread, in: query, schema: { type: boolean }, description: 'true : alertes non lues seulement' }
+        - { $ref: '#/components/parameters/FromOptional' }
+        - { $ref: '#/components/parameters/ToOptional' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AlertPage' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /me/alerts/read-all:
+    post:
+      tags: [Compte]
+      security: [{ bearer: [] }]
+      summary: Marquer toutes mes alertes comme lues
+      responses:
+        '204': { description: Fait }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /me/alerts/{alertId}/read:
+    parameters: [{ $ref: '#/components/parameters/AlertId' }]
+    post:
+      tags: [Compte]
+      security: [{ bearer: [] }]
+      summary: Marquer une alerte comme lue
+      responses:
+        '204': { description: Fait }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /me/alerts/{alertId}:
+    parameters: [{ $ref: '#/components/parameters/AlertId' }]
+    delete:
+      tags: [Compte]
+      security: [{ bearer: [] }]
+      summary: Retirer une alerte de mes notifications (l'alerte reste publique)
+      responses:
+        '204': { description: Retirée }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/dashboard:
+    get:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Indicateurs de pilotage (permission admin:access)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AdminDashboard' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/stations:
+    get:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Toutes les stations (admin:access)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Station' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Créer une station (stations:manage)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/StationInput' } } } }
+      responses:
+        '201': { description: Créée, content: { application/json: { schema: { $ref: '#/components/schemas/Station' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/stations/{stationId}:
+    parameters: [{ $ref: '#/components/parameters/StationId' }]
+    patch:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Modifier une station (stations:manage)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/StationPatch' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Station' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /admin/thresholds:
+    get:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Tous les seuils (admin:access)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Threshold' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Créer un seuil (thresholds:manage)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ThresholdInput' } } } }
+      responses:
+        '201': { description: Créé, content: { application/json: { schema: { $ref: '#/components/schemas/Threshold' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/thresholds/{thresholdId}:
+    parameters: [{ name: thresholdId, in: path, required: true, schema: { type: string } }]
+    patch:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Modifier un seuil (thresholds:manage, audité)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ThresholdPatch' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Threshold' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+    delete:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Supprimer un seuil (thresholds:manage)
+      responses:
+        '204': { description: Supprimé }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/alerts:
+    get:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Alertes avec informations d'incident (admin:access)
+      parameters: *alertFilters
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AlertPage' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+    post:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Publier une alerte manuelle et notifier les abonnés de la zone (alerts:manage)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AlertCreate' } } } }
+      responses:
+        '201': { description: Créée, content: { application/json: { schema: { $ref: '#/components/schemas/Alert' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /admin/alerts/{alertId}:
+    parameters: [{ $ref: '#/components/parameters/AlertId' }]
+    patch:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Acquitter / résoudre une alerte (alerts:manage)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AlertUpdate' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Alert' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+    delete:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Supprimer définitivement une alerte (alerts:manage)
+      responses:
+        '204': { description: Supprimée }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/articles:
+    get:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Articles tous statuts (articles:manage)
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ArticleStatus' } }
+        - { name: category, in: query, schema: { $ref: '#/components/schemas/ArticleCategory' } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ArticleSummaryPage' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+    post:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Créer un article (articles:manage)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ArticleInput' } } } }
+      responses:
+        '201': { description: Créé, content: { application/json: { schema: { $ref: '#/components/schemas/Article' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/articles/{articleId}:
+    parameters: [{ name: articleId, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Article (articles:manage)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Article' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Modifier un article (articles:manage)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ArticlePatch' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Article' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+    delete:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Supprimer un article (articles:manage)
+      responses:
+        '204': { description: Supprimé }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/media:
+    post:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Envoyer une photo ou une vidéo pour un article (articles:manage)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: 'image/jpeg, image/png, image/webp (5 Mo max) ou video/mp4, video/webm (50 Mo max)' }
+                alt: { type: string, maxLength: 300, description: 'Légende facultative (texte alternatif)' }
+      responses:
+        '201': { description: Média enregistré, content: { application/json: { schema: { $ref: '#/components/schemas/MediaAsset' } } } }
+        '413': { description: Fichier trop lourd, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/data-sources:
+    get:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Sources de données et santé de l'ingestion (admin:access)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DataSource' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/data-sources/{sourceId}:
+    parameters: [{ name: sourceId, in: path, required: true, schema: { type: string } }]
+    patch:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Activer / désactiver une source (sources:manage)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [enabled], properties: { enabled: { type: boolean } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DataSource' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /admin/models:
+    get:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Modèles IA et métriques (admin:access)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AiModel' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/models/{modelId}:
+    parameters: [{ name: modelId, in: path, required: true, schema: { type: string } }]
+    patch:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Changer le statut d'un modèle (models:manage)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [active, candidate, archived] } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AiModel' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /admin/reports:
+    get:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Rapports générés (reports:read)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Report' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Demander un rapport (reports:generate)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReportRequest' } } } }
+      responses:
+        '202': { description: En file d'attente, content: { application/json: { schema: { $ref: '#/components/schemas/Report' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /admin/users:
+    get:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Utilisateurs (users:manage)
+      parameters:
+        - { name: role, in: query, schema: { $ref: '#/components/schemas/Role' } }
+        - { name: status, in: query, schema: { type: string, enum: [active, disabled, pending] } }
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/UserPage' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+    post:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Inviter un utilisateur (users:manage)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UserInvite' } } } }
+      responses:
+        '201': { description: Invité, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '422': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/users/{userId}:
+    parameters: [{ name: userId, in: path, required: true, schema: { type: string } }]
+    patch:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Modifier rôle / statut (users:manage, interdit sur soi-même)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role: { $ref: '#/components/schemas/Role' }
+                status: { type: string, enum: [active, disabled, pending] }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /admin/analytics/usage:
+    get:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Statistiques d'usage (analytics:read)
+      parameters:
+        - { $ref: '#/components/parameters/From' }
+        - { $ref: '#/components/parameters/To' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/UsageStats' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /admin/audit-logs:
+    get:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Journal d'audit (audit:read)
+      parameters:
+        - { name: actorId, in: query, schema: { type: string } }
+        - { name: resource, in: query, schema: { type: string } }
+        - { $ref: '#/components/parameters/FromOptional' }
+        - { $ref: '#/components/parameters/ToOptional' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuditLogPage' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+  /admin/exports:
+    post:
+      tags: [Administration]
+      security: [{ bearer: [] }]
+      summary: Export des données brutes en CSV/JSON (data:export_raw)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ExportQuery' } } } }
+      responses:
+        '200':
+          description: URL signée temporaire
+          content:
+            application/json:
+              schema: { type: object, required: [downloadUrl, fileName, expiresAt], properties: { downloadUrl: { type: string, format: uri }, fileName: { type: string }, expiresAt: { type: string, format: date-time } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+
+  parameters:
+    StationId: { name: stationId, in: path, required: true, schema: { type: string } }
+    AlertId: { name: alertId, in: path, required: true, schema: { type: string } }
+    From: { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+    To: { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+    FromOptional: { name: from, in: query, schema: { type: string, format: date-time } }
+    ToOptional: { name: to, in: query, schema: { type: string, format: date-time } }
+    Granularity: { name: granularity, in: query, schema: { $ref: '#/components/schemas/Granularity' } }
+    Pollutants: { name: pollutants, in: query, description: 'ex. pm25,pm10', schema: { type: string } }
+    Cursor: { name: cursor, in: query, schema: { type: string } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+
+  responses:
+    NotFound: { description: Introuvable, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    Unauthorized: { description: Non authentifié, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    Forbidden: { description: Permission insuffisante, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    Validation: { description: Données invalides (details.fields), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    RateLimited: { description: Trop de requêtes, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+
+  schemas:
+    DateTime: { type: string, format: date-time }
+    NullableNumber: { type: [number, 'null'] }
+
+    AqiLevel: { type: string, enum: [good, moderate, unhealthy_sensitive, unhealthy, very_unhealthy, hazardous] }
+    PollutantCode: { type: string, enum: [pm25, pm10, no2, so2, co, o3] }
+    MeasureCode: { type: string, enum: [pm25, pm10, no2, so2, co, o3, co2, tvoc, nh3, no] }
+    Unit: { type: string, enum: ['µg/m³', 'mg/m³', ppm, ppb, index] }
+    ForecastHorizon: { type: string, enum: [1h, 2h, 3h, 1d, 2d, 3d] }
+    ReferenceStandard: { type: string, enum: [WHO_2021, NS_05_062] }
+    AveragingPeriod: { type: string, enum: [1h, 8h, 24h, 1y] }
+    DataStatus: { type: string, enum: [measured, estimated, forecast] }
+    Freshness: { type: string, enum: [fresh, stale, outdated, unknown] }
+    Granularity: { type: string, enum: [raw, hour, day] }
+    StationType: { type: string, enum: [industrial, residential, road, reference] }
+    StationStatus: { type: string, enum: [online, offline, maintenance] }
+    AlertStatus: { type: string, enum: [active, acknowledged, resolved] }
+    ArticleCategory: { type: string, enum: [alert, info, report, regulation, event, education] }
+    ArticleStatus: { type: string, enum: [draft, published, archived] }
+    HealthProfileId: { type: string, enum: [general, children, elderly, asthma, cardiac, pregnant, outdoor_worker, athlete] }
+    Role: { type: string, enum: [citizen, authority, admin] }
+    Permission:
+      type: string
+      enum: ['profile:manage', 'notifications:manage', 'admin:access', 'alerts:manage', 'articles:manage', 'reports:read', 'reports:generate', 'analytics:read', 'stations:manage', 'thresholds:manage', 'sources:manage', 'models:manage', 'users:manage', 'audit:read', 'data:export_raw']
+
+    ApiError:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, example: slug_taken }
+        message: { type: string }
+        details: { type: object, additionalProperties: true, properties: { fields: { type: object, additionalProperties: { type: string } } } }
+        requestId: { type: string }
+
+    GeoPoint:
+      type: object
+      required: [latitude, longitude]
+      properties: { latitude: { type: number }, longitude: { type: number } }
+
+    ApiMetadata:
+      type: object
+      required: [apiVersion, dataUpdatedAt, models, references]
+      properties:
+        apiVersion: { type: string }
+        dataUpdatedAt: { type: [string, 'null'], format: date-time }
+        models: { type: array, items: { type: object, properties: { name: { type: string }, task: { type: string }, version: { type: string } } } }
+        references: { type: array, items: { $ref: '#/components/schemas/ReferenceStandard' } }
+
+    Zone:
+      type: object
+      required: [id, name, centroid]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        centroid: { $ref: '#/components/schemas/GeoPoint' }
+        geometry: { description: GeoJSON Polygon/MultiPolygon }
+
+    Station:
+      type: object
+      required: [id, externalId, name, shortName, zoneId, zoneName, location, type, status, provider, lastObservedAt]
+      properties:
+        id: { type: string }
+        externalId: { type: [string, 'null'], description: 'ex. location_id AirGradient' }
+        name: { type: string }
+        shortName: { type: string }
+        zoneId: { type: string }
+        zoneName: { type: string }
+        location: { $ref: '#/components/schemas/GeoPoint' }
+        type: { $ref: '#/components/schemas/StationType' }
+        status: { $ref: '#/components/schemas/StationStatus' }
+        provider: { type: string }
+        lastObservedAt: { type: [string, 'null'], format: date-time }
+        latest: { oneOf: [{ $ref: '#/components/schemas/AirQualitySnapshot' }, { type: 'null' }] }
+
+    StationPatch:
+      type: object
+      description: Mise à jour partielle de StationInput (tous les champs sont facultatifs).
+      properties: {"name": {"type": "string", "maxLength": 120}, "shortName": {"type": "string", "maxLength": 40}, "zoneId": {"type": "string"}, "location": {"$ref": "#/components/schemas/GeoPoint"}, "type": {"$ref": "#/components/schemas/StationType"}, "status": {"$ref": "#/components/schemas/StationStatus"}, "externalId": {"type": ["string", "null"]}, "provider": {"type": "string"}}
+    ThresholdPatch:
+      type: object
+      description: Mise à jour partielle de ThresholdInput (tous les champs sont facultatifs).
+      properties: {"pollutant": {"$ref": "#/components/schemas/PollutantCode"}, "reference": {"$ref": "#/components/schemas/ReferenceStandard"}, "period": {"$ref": "#/components/schemas/AveragingPeriod"}, "value": {"type": "number", "exclusiveMinimum": 0}, "unit": {"$ref": "#/components/schemas/Unit"}, "zoneId": {"type": ["string", "null"], "description": "null = seuil global ville"}, "alertLevel": {"$ref": "#/components/schemas/AqiLevel"}, "enabled": {"type": "boolean"}}
+    ArticlePatch:
+      type: object
+      description: Mise à jour partielle de ArticleInput (tous les champs sont facultatifs).
+      properties: {"title": {"type": "string", "minLength": 5, "maxLength": 160}, "slug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 80}, "excerpt": {"type": "string", "minLength": 10, "maxLength": 300}, "content": {"type": "string", "minLength": 20, "maxLength": 50000}, "category": {"$ref": "#/components/schemas/ArticleCategory"}, "status": {"$ref": "#/components/schemas/ArticleStatus"}, "featured": {"type": "boolean"}, "coverImageUrl": {"type": ["string", "null"], "format": "uri", "description": "HTTPS uniquement"}, "mediaIds": {"type": "array", "maxItems": 10, "items": {"type": "string"}, "description": "Médias envoyés via /admin/media, dans l'ordre d'affichage"}, "tags": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 30}}}
+
+    StationInput:
+      type: object
+      required: [name, shortName, zoneId, location, type, status, externalId, provider]
+      properties:
+        name: { type: string, maxLength: 120 }
+        shortName: { type: string, maxLength: 40 }
+        zoneId: { type: string }
+        location: { $ref: '#/components/schemas/GeoPoint' }
+        type: { $ref: '#/components/schemas/StationType' }
+        status: { $ref: '#/components/schemas/StationStatus' }
+        externalId: { type: [string, 'null'] }
+        provider: { type: string }
+
+    Measure:
+      type: object
+      required: [code, value, unit, source, subIndex]
+      properties:
+        code: { $ref: '#/components/schemas/MeasureCode' }
+        value: { $ref: '#/components/schemas/NullableNumber' }
+        unit: { $ref: '#/components/schemas/Unit' }
+        source: { type: string, enum: [sensor, openweathermap, satellite, model], description: Origine de la variable (capteur de la station ou OpenWeatherMap à l'échelle de la ville) }
+        subIndex: { type: [number, 'null'], description: concentration / valeur limite × 100 }
+
+    Weather:
+      type: object
+      required: [temperatureC, humidityPct, windSpeedMs, windDirectionDeg, pressureHpa, precipitationMm, source, observedAt]
+      properties:
+        temperatureC: { $ref: '#/components/schemas/NullableNumber' }
+        humidityPct: { $ref: '#/components/schemas/NullableNumber' }
+        windSpeedMs: { $ref: '#/components/schemas/NullableNumber' }
+        windDirectionDeg: { $ref: '#/components/schemas/NullableNumber' }
+        pressureHpa: { $ref: '#/components/schemas/NullableNumber' }
+        precipitationMm: { $ref: '#/components/schemas/NullableNumber' }
+        source: { type: string, enum: [sensor, openweathermap] }
+        observedAt: { type: [string, 'null'], format: date-time }
+
+    AirQualitySnapshot:
+      type: object
+      required: [aqi, level, dominantPollutant, measures, weather, observedAt, status, freshness]
+      properties:
+        aqi: { $ref: '#/components/schemas/NullableNumber' }
+        level: { oneOf: [{ $ref: '#/components/schemas/AqiLevel' }, { type: 'null' }] }
+        dominantPollutant: { oneOf: [{ $ref: '#/components/schemas/PollutantCode' }, { type: 'null' }] }
+        measures: { type: array, items: { $ref: '#/components/schemas/Measure' } }
+        weather: { oneOf: [{ $ref: '#/components/schemas/Weather' }, { type: 'null' }] }
+        observedAt: { type: [string, 'null'], format: date-time }
+        status: { $ref: '#/components/schemas/DataStatus' }
+        freshness: { $ref: '#/components/schemas/Freshness' }
+
+    LocationAirQuality:
+      allOf:
+        - { $ref: '#/components/schemas/AirQualitySnapshot' }
+        - type: object
+          required: [location, zoneId, zoneName, nearestStationId, distanceToNearestStationM, confidence]
+          properties:
+            location: { $ref: '#/components/schemas/GeoPoint' }
+            zoneId: { type: [string, 'null'] }
+            zoneName: { type: [string, 'null'] }
+            nearestStationId: { type: [string, 'null'] }
+            distanceToNearestStationM: { $ref: '#/components/schemas/NullableNumber' }
+            confidence: { type: [number, 'null'], minimum: 0, maximum: 1 }
+
+    HistoryPoint:
+      type: object
+      required: [at, aqi, values]
+      properties:
+        at: { $ref: '#/components/schemas/DateTime' }
+        aqi: { $ref: '#/components/schemas/NullableNumber' }
+        values: { type: object, additionalProperties: { type: [number, 'null'] }, description: 'clés = MeasureCode' }
+
+    History:
+      type: object
+      required: [scope, scopeId, granularity, from, to, points]
+      properties:
+        scope: { type: string, enum: [station, zone, city] }
+        scopeId: { type: string }
+        granularity: { $ref: '#/components/schemas/Granularity' }
+        from: { $ref: '#/components/schemas/DateTime' }
+        to: { $ref: '#/components/schemas/DateTime' }
+        points: { type: array, items: { $ref: '#/components/schemas/HistoryPoint' } }
+
+    ZoneRanking:
+      type: object
+      required: [zoneId, zoneName, aqi, level, dominantPollutant]
+      properties:
+        zoneId: { type: string }
+        zoneName: { type: string }
+        aqi: { $ref: '#/components/schemas/NullableNumber' }
+        level: { oneOf: [{ $ref: '#/components/schemas/AqiLevel' }, { type: 'null' }] }
+        dominantPollutant: { oneOf: [{ $ref: '#/components/schemas/PollutantCode' }, { type: 'null' }] }
+
+    AirQualitySummary:
+      type: object
+      required: [scope, scopeId, name, aqi, level, dominantPollutant, measures, weather, observedAt, status, freshness, stationsReporting, stationsTotal, comparison, worstZones]
+      properties:
+        scope: { type: string, enum: [city, zone] }
+        scopeId: { type: string }
+        name: { type: string }
+        aqi: { $ref: '#/components/schemas/NullableNumber' }
+        level: { oneOf: [{ $ref: '#/components/schemas/AqiLevel' }, { type: 'null' }] }
+        dominantPollutant: { oneOf: [{ $ref: '#/components/schemas/PollutantCode' }, { type: 'null' }] }
+        measures: { type: array, items: { $ref: '#/components/schemas/Measure' } }
+        weather: { oneOf: [{ $ref: '#/components/schemas/Weather' }, { type: 'null' }] }
+        observedAt: { type: [string, 'null'], format: date-time }
+        status: { $ref: '#/components/schemas/DataStatus' }
+        freshness: { $ref: '#/components/schemas/Freshness' }
+        stationsReporting: { type: integer }
+        stationsTotal: { type: integer }
+        comparison:
+          type: object
+          required: [vsYesterday, vsLastWeek]
+          properties: { vsYesterday: { $ref: '#/components/schemas/NullableNumber' }, vsLastWeek: { $ref: '#/components/schemas/NullableNumber' } }
+        worstZones: { type: array, items: { $ref: '#/components/schemas/ZoneRanking' } }
+
+    HeatmapCell:
+      type: object
+      required: [location, value, aqi, level, uncertainty]
+      properties:
+        location: { $ref: '#/components/schemas/GeoPoint' }
+        value: { $ref: '#/components/schemas/NullableNumber' }
+        aqi: { $ref: '#/components/schemas/NullableNumber' }
+        level: { oneOf: [{ $ref: '#/components/schemas/AqiLevel' }, { type: 'null' }] }
+        uncertainty: { type: [number, 'null'], minimum: 0, maximum: 1 }
+
+    Heatmap:
+      type: object
+      required: [layer, at, resolutionM, method, modelVersion, generatedAt, status, cells]
+      properties:
+        layer: { type: string, description: "PollutantCode ou 'aqi'" }
+        at: { $ref: '#/components/schemas/DateTime' }
+        resolutionM: { type: integer }
+        method: { type: string, enum: [kriging, idw, random_forest, cokriging] }
+        modelVersion: { type: string }
+        generatedAt: { $ref: '#/components/schemas/DateTime' }
+        status: { $ref: '#/components/schemas/DataStatus' }
+        cells: { type: array, items: { $ref: '#/components/schemas/HeatmapCell' } }
+
+    Forecast:
+      type: object
+      required: [horizon, validAt, aqi, level, dominantPollutant, values, confidence, interval, trend, drivers]
+      properties:
+        horizon: { $ref: '#/components/schemas/ForecastHorizon' }
+        validAt: { $ref: '#/components/schemas/DateTime' }
+        aqi: { $ref: '#/components/schemas/NullableNumber' }
+        level: { oneOf: [{ $ref: '#/components/schemas/AqiLevel' }, { type: 'null' }] }
+        dominantPollutant: { oneOf: [{ $ref: '#/components/schemas/PollutantCode' }, { type: 'null' }] }
+        values: { type: object, additionalProperties: { type: [number, 'null'] } }
+        confidence: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        interval: { oneOf: [{ type: object, required: [low, high], properties: { low: { type: number }, high: { type: number } } }, { type: 'null' }] }
+        trend: { type: string, enum: [up, down, stable] }
+        drivers: { type: array, items: { type: string }, description: Facteurs explicatifs (SHAP) en langage clair }
+
+    ForecastSet:
+      type: object
+      required: [scope, scopeId, modelName, modelVersion, generatedAt, status, forecasts]
+      properties:
+        scope: { type: string, enum: [city, zone, station] }
+        scopeId: { type: string }
+        modelName: { type: string, example: XGBoost }
+        modelVersion: { type: string }
+        generatedAt: { $ref: '#/components/schemas/DateTime' }
+        status: { $ref: '#/components/schemas/DataStatus' }
+        forecasts: { type: array, items: { $ref: '#/components/schemas/Forecast' } }
+
+    Alert:
+      type: object
+      required: [id, origin, severity, status, pollutant, value, unit, threshold, reference, stationId, stationName, zoneId, zoneName, title, message, recommendations, startedAt, acknowledgedAt, resolvedAt]
+      properties:
+        id: { type: string }
+        origin: { type: string, enum: [sensor, manual], description: 'sensor : déclenchée par une mesure ; manual : publiée par une autorité ou un administrateur' }
+        severity: { $ref: '#/components/schemas/AqiLevel' }
+        status: { $ref: '#/components/schemas/AlertStatus' }
+        pollutant: { $ref: '#/components/schemas/PollutantCode' }
+        value: { type: number }
+        unit: { $ref: '#/components/schemas/Unit' }
+        threshold: { type: number }
+        reference: { $ref: '#/components/schemas/ReferenceStandard' }
+        stationId: { type: [string, 'null'] }
+        stationName: { type: [string, 'null'] }
+        zoneId: { type: [string, 'null'] }
+        zoneName: { type: [string, 'null'] }
+        title: { type: string }
+        message: { type: string }
+        recommendations: { type: array, items: { type: string } }
+        startedAt: { $ref: '#/components/schemas/DateTime' }
+        acknowledgedAt: { type: [string, 'null'], format: date-time }
+        resolvedAt: { type: [string, 'null'], format: date-time }
+        incidentNote: { type: [string, 'null'], description: Routes /admin uniquement }
+        handledBy: { type: [string, 'null'], description: Routes /admin uniquement }
+        read: { type: boolean, description: 'Routes /me uniquement : alerte déjà lue par l''utilisateur' }
+
+    AlertCreate:
+      type: object
+      required: [zoneId, severity, pollutant, title, message]
+      properties:
+        zoneId: { type: string }
+        stationId: { type: [string, 'null'] }
+        severity: { $ref: '#/components/schemas/AqiLevel' }
+        pollutant: { $ref: '#/components/schemas/PollutantCode' }
+        value: { type: [number, 'null'], description: 'Valeur observée ; par défaut, le seuil du polluant' }
+        title: { type: string, minLength: 5, maxLength: 200 }
+        message: { type: string, minLength: 10, maxLength: 2000 }
+        recommendations: { type: array, maxItems: 5, items: { type: string, maxLength: 200 } }
+
+    AlertUpdate:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [acknowledged, resolved], description: Une alerte résolue ne peut pas être rouverte }
+        incidentNote: { type: string, maxLength: 2000 }
+
+    AlertPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Alert' } }
+        nextCursor: { type: [string, 'null'] }
+        total: { type: integer }
+
+    Threshold:
+      allOf:
+        - { $ref: '#/components/schemas/ThresholdInput' }
+        - type: object
+          required: [id, updatedAt, updatedBy]
+          properties:
+            id: { type: string }
+            updatedAt: { $ref: '#/components/schemas/DateTime' }
+            updatedBy: { type: [string, 'null'] }
+
+    ThresholdInput:
+      type: object
+      required: [pollutant, reference, period, value, unit, zoneId, alertLevel, enabled]
+      properties:
+        pollutant: { $ref: '#/components/schemas/PollutantCode' }
+        reference: { $ref: '#/components/schemas/ReferenceStandard' }
+        period: { $ref: '#/components/schemas/AveragingPeriod' }
+        value: { type: number, exclusiveMinimum: 0 }
+        unit: { $ref: '#/components/schemas/Unit' }
+        zoneId: { type: [string, 'null'], description: null = seuil global ville }
+        alertLevel: { $ref: '#/components/schemas/AqiLevel' }
+        enabled: { type: boolean }
+
+    HealthGuidance:
+      type: object
+      required: [profile, level, title, actions, disclaimer]
+      properties:
+        profile: { $ref: '#/components/schemas/HealthProfileId' }
+        level: { $ref: '#/components/schemas/AqiLevel' }
+        title: { type: string }
+        actions: { type: array, items: { type: string } }
+        disclaimer: { type: string }
+
+    ArticleSummary:
+      type: object
+      required: [id, slug, title, excerpt, category, status, featured, coverImageUrl, media, tags, author, publishedAt, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        title: { type: string }
+        excerpt: { type: string }
+        category: { $ref: '#/components/schemas/ArticleCategory' }
+        status: { $ref: '#/components/schemas/ArticleStatus' }
+        featured: { type: boolean }
+        coverImageUrl: { type: [string, 'null'], format: uri }
+        media: { type: array, items: { $ref: '#/components/schemas/MediaAsset' } }
+        tags: { type: array, items: { type: string } }
+        author:
+          type: object
+          required: [id, name, role]
+          properties: { id: { type: [string, 'null'] }, name: { type: string }, role: { type: string } }
+        publishedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { $ref: '#/components/schemas/DateTime' }
+        updatedAt: { $ref: '#/components/schemas/DateTime' }
+
+    Article:
+      allOf:
+        - { $ref: '#/components/schemas/ArticleSummary' }
+        - type: object
+          required: [content]
+          properties: { content: { type: string, description: Markdown (HTML brut ignoré par le front) } }
+
+    MediaAsset:
+      type: object
+      required: [id, kind, url, mimeType, sizeBytes, fileName, alt, width, height, durationSec, posterUrl, createdAt]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [image, video] }
+        url: { type: string, format: uri, description: HTTPS }
+        mimeType: { type: string }
+        sizeBytes: { type: integer }
+        fileName: { type: string }
+        alt: { type: string }
+        width: { type: [integer, 'null'] }
+        height: { type: [integer, 'null'] }
+        durationSec: { type: [number, 'null'] }
+        posterUrl: { type: [string, 'null'], format: uri }
+        createdAt: { $ref: '#/components/schemas/DateTime' }
+
+    ArticleSummaryPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ArticleSummary' } }
+        nextCursor: { type: [string, 'null'] }
+        total: { type: integer }
+
+    ArticleInput:
+      type: object
+      required: [title, excerpt, content, category, status, featured, coverImageUrl, mediaIds, tags]
+      properties:
+        title: { type: string, minLength: 5, maxLength: 160 }
+        slug: { type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$', maxLength: 80 }
+        excerpt: { type: string, minLength: 10, maxLength: 300 }
+        content: { type: string, minLength: 20, maxLength: 50000 }
+        category: { $ref: '#/components/schemas/ArticleCategory' }
+        status: { $ref: '#/components/schemas/ArticleStatus' }
+        featured: { type: boolean }
+        coverImageUrl: { type: [string, 'null'], format: uri, description: HTTPS uniquement }
+        mediaIds: { type: array, maxItems: 10, items: { type: string }, description: "Médias envoyés via /admin/media, dans l'ordre d'affichage" }
+        tags: { type: array, maxItems: 10, items: { type: string, maxLength: 30 } }
+
+    User:
+      type: object
+      required: [id, email, fullName, role, status, zoneIds, healthProfile, mfaEnabled, createdAt, lastLoginAt]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        fullName: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        status: { type: string, enum: [active, disabled, pending] }
+        zoneIds: { type: array, items: { type: string } }
+        healthProfile: { oneOf: [{ $ref: '#/components/schemas/HealthProfileId' }, { type: 'null' }] }
+        mfaEnabled: { type: boolean }
+        createdAt: { $ref: '#/components/schemas/DateTime' }
+        lastLoginAt: { type: [string, 'null'], format: date-time }
+
+    Me:
+      allOf:
+        - { $ref: '#/components/schemas/User' }
+        - type: object
+          required: [permissions]
+          properties: { permissions: { type: array, items: { $ref: '#/components/schemas/Permission' } } }
+
+    UserPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/User' } }
+        nextCursor: { type: [string, 'null'] }
+        total: { type: integer }
+
+    UserInvite:
+      type: object
+      required: [email, fullName, role]
+      properties:
+        email: { type: string, format: email }
+        fullName: { type: string, maxLength: 120 }
+        role: { $ref: '#/components/schemas/Role' }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, maxLength: 128 }
+        otp: { type: string, pattern: '^\d{6}$' }
+
+    RegisterRequest:
+      type: object
+      required: [email, password, fullName, zoneIds, healthProfile, consent]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 10, maxLength: 128 }
+        fullName: { type: string, maxLength: 120 }
+        zoneIds: { type: array, maxItems: 5, items: { type: string } }
+        healthProfile: { oneOf: [{ $ref: '#/components/schemas/HealthProfileId' }, { type: 'null' }] }
+        consent:
+          type: object
+          required: [terms, healthData]
+          properties: { terms: { const: true }, healthData: { type: boolean } }
+
+    Session:
+      type: object
+      required: [accessToken, accessTokenExpiresAt, user]
+      properties:
+        accessToken: { type: string }
+        accessTokenExpiresAt: { $ref: '#/components/schemas/DateTime' }
+        refreshToken: { type: string, description: Mobile uniquement ; le web reçoit un cookie httpOnly }
+        user: { $ref: '#/components/schemas/Me' }
+
+    MfaChallenge:
+      type: object
+      required: [mfaRequired, challengeId]
+      properties: { mfaRequired: { const: true }, challengeId: { type: string } }
+
+    ProfileUpdate:
+      type: object
+      properties:
+        fullName: { type: string, maxLength: 120 }
+        zoneIds: { type: array, maxItems: 5, items: { type: string } }
+        healthProfile: { oneOf: [{ $ref: '#/components/schemas/HealthProfileId' }, { type: 'null' }] }
+
+    NotificationPreferences:
+      type: object
+      required: [pushEnabled, emailEnabled, zoneIds, minLevel, pollutants, quietHours]
+      properties:
+        pushEnabled: { type: boolean }
+        emailEnabled: { type: boolean }
+        zoneIds: { type: array, maxItems: 5, items: { type: string } }
+        minLevel: { $ref: '#/components/schemas/AqiLevel' }
+        pollutants: { type: array, minItems: 1, items: { $ref: '#/components/schemas/PollutantCode' } }
+        quietHours:
+          oneOf:
+            - type: object
+              required: [start, end]
+              properties: { start: { type: string, pattern: '^\d{2}:\d{2}$' }, end: { type: string, pattern: '^\d{2}:\d{2}$' } }
+            - { type: 'null' }
+
+    DeviceRegistration:
+      type: object
+      required: [token, platform]
+      properties: { token: { type: string }, platform: { type: string, enum: [ios, android, web] } }
+
+    AdminDashboard:
+      type: object
+      required: [generatedAt, cityAqi, cityLevel, maxAqi, stations, alerts, articles, users, topZones, dataSources]
+      properties:
+        generatedAt: { $ref: '#/components/schemas/DateTime' }
+        cityAqi: { $ref: '#/components/schemas/NullableNumber' }
+        cityLevel: { oneOf: [{ $ref: '#/components/schemas/AqiLevel' }, { type: 'null' }] }
+        maxAqi: { $ref: '#/components/schemas/NullableNumber' }
+        stations: { type: object, properties: { total: { type: integer }, online: { type: integer }, offline: { type: integer }, maintenance: { type: integer } } }
+        alerts:
+          type: object
+          properties:
+            active: { type: integer }
+            acknowledged: { type: integer }
+            last24h: { type: integer }
+            byLevel: { type: array, items: { type: object, properties: { level: { $ref: '#/components/schemas/AqiLevel' }, count: { type: integer } } } }
+        articles: { type: object, properties: { published: { type: integer }, drafts: { type: integer } } }
+        users: { type: object, properties: { total: { type: integer }, newLast7d: { type: integer } } }
+        topZones: { type: array, items: { $ref: '#/components/schemas/ZoneRanking' } }
+        dataSources: { type: object, properties: { healthy: { type: integer }, degraded: { type: integer }, down: { type: integer } } }
+
+    DataSource:
+      type: object
+      required: [id, name, kind, status, enabled, lastSyncAt, rejectionRate24h, description]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [sensor_network, weather_api, satellite, dataset] }
+        status: { type: string, enum: [healthy, degraded, down, disabled] }
+        enabled: { type: boolean }
+        lastSyncAt: { type: [string, 'null'], format: date-time }
+        rejectionRate24h: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        description: { type: string }
+
+    AiModel:
+      type: object
+      required: [id, name, task, algorithm, version, status, metrics, trainedAt, trackingUrl]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        task: { type: string, enum: [forecast, interpolation, classification] }
+        algorithm: { type: string }
+        version: { type: string }
+        status: { type: string, enum: [active, candidate, archived] }
+        metrics: { type: object, properties: { r2: { $ref: '#/components/schemas/NullableNumber' }, rmse: { $ref: '#/components/schemas/NullableNumber' }, mae: { $ref: '#/components/schemas/NullableNumber' } } }
+        trainedAt: { $ref: '#/components/schemas/DateTime' }
+        trackingUrl: { type: [string, 'null'], format: uri }
+
+    Report:
+      type: object
+      required: [id, period, from, to, status, format, downloadUrl, fileName, generatedAt, requestedBy]
+      properties:
+        id: { type: string }
+        period: { type: string, enum: [weekly, monthly, custom] }
+        from: { $ref: '#/components/schemas/DateTime' }
+        to: { $ref: '#/components/schemas/DateTime' }
+        status: { type: string, enum: [queued, running, ready, failed] }
+        format: { type: string, enum: [pdf, csv, json] }
+        downloadUrl: { type: [string, 'null'], format: uri }
+        fileName: { type: [string, 'null'] }
+        generatedAt: { type: [string, 'null'], format: date-time }
+        requestedBy: { type: [string, 'null'] }
+
+    ReportRequest:
+      type: object
+      required: [period, from, to, format]
+      properties:
+        period: { type: string, enum: [weekly, monthly, custom] }
+        from: { $ref: '#/components/schemas/DateTime' }
+        to: { $ref: '#/components/schemas/DateTime' }
+        format: { type: string, enum: [pdf, csv, json] }
+
+    UsageStats:
+      type: object
+      required: [from, to, activeUsers, sessions, pushSent, byPlatform, daily]
+      properties:
+        from: { $ref: '#/components/schemas/DateTime' }
+        to: { $ref: '#/components/schemas/DateTime' }
+        activeUsers: { type: integer }
+        sessions: { type: integer }
+        pushSent: { type: integer }
+        byPlatform: { type: array, items: { type: object, properties: { platform: { type: string, enum: [ios, android, web] }, sessions: { type: integer } } } }
+        daily: { type: array, items: { type: object, properties: { day: { type: string, format: date }, sessions: { type: integer }, activeUsers: { type: integer } } } }
+
+    AuditLogEntry:
+      type: object
+      required: [id, at, actorId, actorEmail, action, resource, resourceId, changes, ip]
+      properties:
+        id: { type: string }
+        at: { $ref: '#/components/schemas/DateTime' }
+        actorId: { type: [string, 'null'], description: null si l'auteur a supprimé son compte ou pour une tâche planifiée }
+        actorEmail: { type: string }
+        action: { type: string, example: threshold.update }
+        resource: { type: string }
+        resourceId: { type: [string, 'null'] }
+        changes: { type: [object, 'null'], additionalProperties: { type: object, properties: { from: {}, to: {} } } }
+        ip: { type: [string, 'null'] }
+
+    AuditLogPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AuditLogEntry' } }
+        nextCursor: { type: [string, 'null'] }
+        total: { type: integer }
+
+    ExportQuery:
+      type: object
+      required: [dataset, format, from, to]
+      properties:
+        dataset: { type: string, enum: [readings, alerts, forecasts] }
+        format: { type: string, enum: [csv, json] }
+        from: { $ref: '#/components/schemas/DateTime' }
+        to: { $ref: '#/components/schemas/DateTime' }
+        stationIds: { type: array, items: { type: string } }

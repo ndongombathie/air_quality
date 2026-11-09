@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://senair.sn/schemas/forecast.v1.json",
+  "title": "Prévisions SEN-AIR v1 (topic senair.forecasts.v1)",
+  "description": "Lot de prévisions produit par un modèle de l'équipe IA pour une portée (ville, zone ou station). L'API n'invente jamais de prévision : elle sert le dernier lot reçu.",
+  "type": "object",
+  "required": ["schemaVersion", "messageId", "model", "scope", "scopeId", "generatedAt", "forecasts"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "messageId": { "type": "string", "minLength": 8, "maxLength": 80 },
+    "model": {
+      "type": "object",
+      "required": ["id", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9-]{3,80}$" },
+        "name": { "type": "string" },
+        "algorithm": { "type": "string" },
+        "version": { "type": "string", "maxLength": 40 }
+      }
+    },
+    "scope": { "enum": ["city", "zone", "station"] },
+    "scopeId": { "type": "string", "description": "« thies » pour la ville, identifiant de zone ou de station sinon." },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "forecasts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["horizon", "validAt", "aqi"],
+        "additionalProperties": false,
+        "properties": {
+          "horizon": { "enum": ["1h", "2h", "3h", "1d", "2d", "3d"] },
+          "validAt": { "type": "string", "format": "date-time" },
+          "aqi": { "type": ["number", "null"], "minimum": 0 },
+          "dominantPollutant": { "enum": ["pm25", "pm10", "no2", "so2", "co", "o3", null] },
+          "values": { "type": "object", "propertyNames": { "enum": ["pm25", "pm10", "no2", "so2", "co", "o3"] }, "additionalProperties": { "type": ["number", "null"] } },
+          "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+          "interval": { "type": ["object", "null"], "required": ["low", "high"], "properties": { "low": { "type": "number" }, "high": { "type": "number" } } },
+          "drivers": { "type": "array", "items": { "type": "string", "maxLength": 200 }, "description": "Facteurs explicatifs (SHAP) en langage clair." }
+        }
+      }
+    }
+  }
+}

@@ -1,2 +1,45 @@
+# Dépendances et builds
+node_modules/
+dist/
+dev-dist/
+web-build/
+.expo/
+*.tsbuildinfo
+coverage/
+
+# Environnement (jamais de secret dans le dépôt)
 .env
-airflow/logs
+.env.*
+!.env.example
+
+# Natif Expo (générés par prebuild)
+senair.mobile/android/
+senair.mobile/ios/
+
+# Python / data (sous-projets backend)
+__pycache__/
+*.pyc
+venv/
+.venv/
+.ipynb_checkpoints/
+
+# Système / éditeurs
+.DS_Store
+*.log
+.idea/
+.agents
+.vscode/
+*.vscode/
+.codex/
+.github/
+.aws/
+_archive/
+
+
+# Dépôt séparé de l'équipe IA (son propre distant)
+projet-transversal/
+
+# Données et fichiers générés en local (backend)
+senair.api/db.sqlite3
+senair.api/media/
+senair.api/staticfiles/

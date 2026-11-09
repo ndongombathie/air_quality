@@ -1,0 +1,25 @@
+{
+  "name": "senair-frontend",
+  "private": true,
+  "description": "SEN-AIR — monorepo front (web PWA + mobile) et socle partagé @senair/core",
+  "workspaces": [
+    "packages/*",
+    "senair.web",
+    "senair.mobile"
+  ],
+  "scripts": {
+    "web": "npm run dev --workspace senair.web",
+    "mobile": "npm run start --workspace senair.mobile",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build:web": "npm run build --workspace senair.web",
+    "check": "npm run typecheck && npm run test && npm run build:web",
+    "brand": "node scripts/brand/generate.mjs"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "overrides": {
+    "react-native-worklets": "0.13.0"
+  }
+}

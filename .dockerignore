@@ -1,0 +1,22 @@
+# Contexte Docker = racine du monorepo : on n'envoie que le backend et les contrats.
+**/node_modules
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/db.sqlite3
+**/media
+**/.env
+**/.expo
+**/dist
+.git
+_archives
+senair.web
+senair.mobile
+packages
+air_quality
+projet-transversal
+Donnée
+*.pdf
