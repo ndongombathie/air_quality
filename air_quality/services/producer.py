@@ -31,7 +31,6 @@ while True:
         for station in stations:
             location_name = station.get("locationName", "")
 
-                
             if (
                 "thiès" not in location_name.lower()
                 and "thies" not in location_name.lower()

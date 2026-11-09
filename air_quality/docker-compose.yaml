@@ -31,7 +31,7 @@ x-airflow-common: &airflow-common
 
 services:
   minio:
-    image: minio/minio
+    image: alpine/minio:RELEASE.2025-10-15T17-29-55Z
     container_name: minio-air_quality
     ports:
       - "9000:9000"

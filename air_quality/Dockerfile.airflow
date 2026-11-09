@@ -18,4 +18,5 @@ RUN pip install --no-cache-dir \
     kafka-python-ng \
     scikit-learn \
     matplotlib \
-    joblib
+    joblib \
+    xgboost
